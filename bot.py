@@ -61,13 +61,34 @@ def get_catalog_menu(products):
     return builder.as_markup()
 
 # --- ОБРАБОТЧИКИ ---
-@dp.message(Command("start"))
-async def start(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "Добро пожаловать в наш магазин! 👋\nВыберите действие:",
-        reply_markup=get_main_menu()
-    )
+@dp.callback_query(F.data == "cart")
+async def show_cart(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    cart = data.get("cart", [])
+    
+    if not cart:
+        await callback.message.edit_text("Ваша корзина пуста. 😔", reply_markup=get_main_menu())
+        await callback.answer()
+        return
+
+    total = 0
+    text = "🛒 *Ваша корзина:*\n\n"
+    async with aiosqlite.connect(DB_NAME) as db:
+        for prod_id in cart:
+            async with db.execute("SELECT name, price FROM products WHERE id = ?", (prod_id,)) as cursor:
+                prod = await cursor.fetchone()
+                if prod:
+                    text += f"- {prod[0]}: {prod[1]}₽\n"
+                    total += prod[1]
+    
+    text += f"\n*Итого: {total}₽*"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Оформить заказ", callback_data="checkout"))
+    builder.row(InlineKeyboardButton(text="⬅️ В главное меню", callback_data="back_to_menu"))
+    
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
 
 @dp.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
